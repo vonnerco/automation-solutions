@@ -1,0 +1,12 @@
+{
+  "invoices": [
+    {
+      "id": "INV-1001",
+      "vendor_name": "Acme Office Supplies",
+      "amount": 320.50,
+      "date": "2026-07-15",
+      "due_date": "2026-08-15",
+      "raw_text": "Invoice INV-1001\nVendor: Acme Office Supplies\nDate: 2026-07-15\nDue: 2026-08-15\nItem: Office Supplies - Qty 1 @ $320.50\nSubtotal: $297.69\nTax: $22.81\nTotal: $320.50"
+    }
+  ]
+}

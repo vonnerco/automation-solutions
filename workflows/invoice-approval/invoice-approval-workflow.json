@@ -1,0 +1,496 @@
+{
+  "name": "Invoice Processing & Approval Automation",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 450],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 60
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 150],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 750],
+      "disabled": false,
+      "webhookId": "invoice-webhook-id"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================\n// VALIDATE INPUT\n// ============================================\nconst allItems = $input.all();\n\nif (!allItems || allItems.length === 0) {\n  return [{ json: { _source: 'manual', invoices: [], _validated: true } }];\n}\n\nconst item = allItems[0];\nlet body = item.json || {};\n\n// Webhook wraps payload in .body\nif (body.body && typeof body.body === 'object') {\n  body = body.body;\n}\n\nconst isManual =\n  Object.keys(body).length === 0 ||\n  body.manualTriggerPayload !== undefined ||\n  body._source === 'manual';\n\nif (isManual) {\n  return [{ json: { _source: 'manual', invoices: [], _validated: true } }];\n}\n\nconst hasBinary = item.binary && Object.keys(item.binary).length > 0;\n\nif (hasBinary && Object.keys(body).length === 0) {\n  return [{\n    json: { _source: 'webhook_binary', invoices: [], _validated: true, _binary: true },\n    binary: item.binary\n  }];\n}\n\nlet invoices = [];\nif (Array.isArray(body.invoices)) {\n  invoices = body.invoices;\n} else if (Array.isArray(body)) {\n  invoices = body;\n} else if (body.vendor || body.vendor_name || body.amount || body.text) {\n  invoices = [body];\n}\n\nif (invoices.length === 0 && !hasBinary) {\n  return [{\n    json: {\n      _source: 'webhook',\n      invoices: [],\n      _validated: false,\n      _error: 'No invoices found in request body',\n      _receivedKeys: Object.keys(body)\n    }\n  }];\n}\n\nreturn [{ json: { _source: 'webhook', invoices: invoices, _validated: true } }];"
+      },
+      "id": "validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 450]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json._validated }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-valid",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 450]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: {\n  status: 'error',\n  code: 400,\n  message: $json._error || 'Invalid payload',\n  receivedKeys: $json._receivedKeys || []\n}}];"
+      },
+      "id": "return-validation-error",
+      "name": "Return Validation Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [940, 700]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "respond-validation-error",
+      "name": "Respond Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1160, 700]
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================\n// EXTRACT INVOICE DATA\n// ============================================\nconst inputItems = $input.all();\nif (!inputItems.length) return [];\n\nconst validated = inputItems[0].json || {};\nconst source = validated._source || 'webhook';\nconst invoices = validated.invoices || [];\n\n// DEMO MODE\nif (source === 'manual') {\n  return [{\n    json: {\n      invoiceId: 'INV-DEMO-001',\n      vendor: 'Acme Office Supplies',\n      amount: 499.0,\n      date: '2026-07-01',\n      dueDate: '2026-08-01',\n      rawText: 'Invoice INV-DEMO-001\\nVendor: Acme Office Supplies\\nDate: 2026-07-01\\nDue: 2026-08-01\\nItem: Office Supplies - Qty 1 @ $499.00\\nSubtotal: $460.00\\nTax: $39.00\\nTotal: $499.00',\n      originalFile: 'invoice-499.txt',\n      hasImage: false,\n      ocrError: null\n    }\n  }];\n}\n\nconst results = [];\nfor (let idx = 0; idx < invoices.length; idx++) {\n  const invoice = invoices[idx];\n  const rawText = invoice.raw_text || invoice.full_text || invoice.text || '';\n\n  results.push({\n    json: {\n      invoiceId: invoice.id || invoice.invoice_number || 'INV-' + (idx + 1),\n      vendor: invoice.vendor_name || invoice.vendor || 'Unknown Vendor',\n      amount: parseFloat(invoice.amount || invoice.total || 0),\n      date: invoice.date || invoice.invoice_date || '',\n      dueDate: invoice.due_date || invoice.dueDate || '',\n      rawText: rawText,\n      ocrError: null,\n      originalFile: invoice.filename || invoice.file_name || 'json-payload',\n      hasImage: Boolean(invoice.image || invoice.image_base64),\n      needsOcr: Boolean((invoice.image || invoice.image_base64) && !rawText),\n      imageData: invoice.image_base64 || invoice.image || null\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "data-extract",
+      "name": "Extract Invoice Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [940, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-text",
+              "leftValue": "={{ $json.rawText }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-ocr-ok",
+      "name": "Has Text?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1160, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: {\n  status: 'error',\n  code: 502,\n  message: 'No invoice text available',\n  detail: $json.ocrError || 'Provide raw_text or text field, or run OCR service',\n  invoiceId: $json.invoiceId\n}}];"
+      },
+      "id": "return-ocr-error",
+      "name": "Return OCR Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1380, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-ocr-error",
+      "name": "Respond OCR Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1600, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "const invoice = $json;\n\nconst system = `You are an accounts payable analyst. Extract structured data from the invoice text below.\n\nReturn ONLY a valid JSON object. No markdown fences, no explanation, no prose. Just JSON.\n\nUse this exact schema:\n{\n  \"vendor_name\": \"string\",\n  \"invoice_number\": \"string\",\n  \"line_items\": [{\"description\": \"string\", \"quantity\": number, \"unit_price\": number, \"total\": number}],\n  \"subtotal\": number,\n  \"tax\": number,\n  \"total\": number,\n  \"due_date\": \"YYYY-MM-DD\",\n  \"category\": \"string (e.g. Office Supplies, Software, Consulting)\",\n  \"anomalies\": [\"string list of concerns, empty if none\"],\n  \"confidence\": number between 0 and 1\n}`;\n\nreturn [{ json: {\n  _original: invoice,\n  model: 'gpt-oss:120b-cloud',\n  temperature: 0.1,\n  stream: false,\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: invoice.rawText }\n  ]\n}}];"
+      },
+      "id": "build-ai-body",
+      "name": "Build AI Request Body",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1380, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/v1/chat/completions",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, temperature: $json.temperature, stream: false, messages: $json.messages }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "ai-extract",
+      "name": "AI: Extract & Validate Invoice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const httpResp = $input.first().json;\nconst aiText = httpResp.choices?.[0]?.message?.content ?? '';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(aiText);\n} catch (e) {\n  const fenced = aiText.match(/```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?```/);\n  if (fenced) {\n    try { parsed = JSON.parse(fenced[1]); } catch (e2) { parsed = null; }\n  }\n  if (!parsed) {\n    const obj = aiText.match(/\\{[\\s\\S]*\\}/);\n    if (obj) {\n      try { parsed = JSON.parse(obj[0]); } catch (e3) { parsed = { error: 'AI returned non-JSON', raw: aiText.substring(0, 500) }; }\n    } else {\n      parsed = { error: 'AI returned non-JSON', raw: aiText.substring(0, 500) };\n    }\n  }\n}\n\n// Retrieve original invoice from upstream Build AI Request Body\nconst upstream = $('Build AI Request Body').all();\nconst idx = Math.min($itemIndex || 0, upstream.length - 1);\nconst original = upstream[idx]?.json?._original || {};\n\nconst finalAmount = (original.amount && original.amount > 0)\n  ? original.amount\n  : parseFloat(parsed.total || 0);\n\nreturn [{ json: {\n  ...original,\n  invoice: parsed,\n  amount: finalAmount\n}}];"
+      },
+      "id": "parse-ai-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1820, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "amount-check",
+              "leftValue": "={{ $json.amount }}",
+              "rightValue": 499,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            },
+            {
+              "id": "confidence-check",
+              "leftValue": "={{ $json.invoice?.confidence ?? 1 }}",
+              "rightValue": 0.9,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "decision-split",
+      "name": "Amount <= $499?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2040, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: {\n  status: 'approved',\n  code: 200,\n  invoiceId: $json.invoiceId,\n  vendor: $json.vendor,\n  amount: $json.amount,\n  approvedAt: new Date().toISOString(),\n  approvedBy: 'Auto',\n  aiExtraction: $json.invoice,\n  model: 'gpt-oss:120b-cloud',\n  message: 'Invoice auto-approved (<=$499 threshold)'\n}}];"
+      },
+      "id": "auto-approve",
+      "name": "Auto-Approve <=$499",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2260, 180]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-approved",
+      "name": "Respond Approved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2480, 180]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: {\n  status: 'pending_review',\n  code: 202,\n  invoiceId: $json.invoiceId,\n  vendor: $json.vendor,\n  amount: $json.amount,\n  reason: 'Amount $' + $json.amount + ' exceeds auto-approval threshold ($499)',\n  submittedAt: new Date().toISOString(),\n  aiExtraction: $json.invoice,\n  model: 'gpt-oss:120b-cloud',\n  message: 'Invoice queued for manual review',\n  nextStep: 'Notify AP team / write to review queue'\n}}];"
+      },
+      "id": "needs-review",
+      "name": "Needs Manual Review",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2260, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "respond-review",
+      "name": "Respond Needs Review",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2480, 420]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Extract Invoice Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Invoice Data": {
+      "main": [
+        [
+          {
+            "node": "Has Text?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Text?": {
+      "main": [
+        [
+          {
+            "node": "Build AI Request Body",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return OCR Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return OCR Error": {
+      "main": [
+        [
+          {
+            "node": "Respond OCR Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Request Body": {
+      "main": [
+        [
+          {
+            "node": "AI: Extract & Validate Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Extract & Validate Invoice": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Amount <= $499?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Amount <= $499?": {
+      "main": [
+        [
+          {
+            "node": "Auto-Approve <=$499",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Approve <=$499": {
+      "main": [
+        [
+          {
+            "node": "Respond Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Manual Review": {
+      "main": [
+        [
+          {
+            "node": "Respond Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "invoice-approval-automation",
+  "tags": [
+    "accounts-payable",
+    "ai",
+    "approval",
+    "automation",
+    "demo",
+    "invoice-processing"
+  ],
+  "description": "Invoice Processing & Approval Automation workflow: AI extraction via local Ollama (text-only), auto-approves invoices <=$499, routes higher amounts to manual review. Webhook, manual, and schedule triggers supported. Stub outputs used for demo (no DB/email credentials required)."
+}
