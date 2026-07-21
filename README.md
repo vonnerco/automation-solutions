@@ -94,4 +94,4 @@ Vonnerco - Automation/
 
 Vonnerco Consulting helps small and mid-sized businesses adopt AI and automation — from workflow design through integration and ongoing support. This repository is a technical companion to that work: it shows, not just tells, what the engagements produce.
 
-**For service inquiries, [send a message via the contact form](./contact.html).**
+**For service inquiries, [book a free consultation at the Vonnerco portal](https://web-portal.corderio-vonner.workers.dev/).**
