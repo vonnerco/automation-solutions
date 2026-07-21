@@ -1,6 +1,6 @@
 # Invoice Approval Workflow
 
-> **Demo / portfolio piece — not production accounting software.** This workflow is a self-contained demonstration of an AI-assisted invoice intake pattern. It does not persist data, send notifications, or include auth or audit logging. For real accounts-payable automation (QuickBooks, NetSuite, Xero, Sage, etc., with proper review trails, fraud checks, and human-in-the-loop escalation), **[get in touch with Vonnerco Consulting](https://formspree.io/f/xdavekay)** — this kind of work is exactly what we do.
+> **Demo / portfolio piece — not production accounting software.** This workflow is a self-contained demonstration of an AI-assisted invoice intake pattern. It does not persist data, send notifications, or include auth or audit logging. For real accounts-payable automation (QuickBooks, NetSuite, Xero, Sage, etc., with proper review trails, fraud checks, and human-in-the-loop escalation), **[get in touch with Vonnerco Consulting](../../contact.html)** — this kind of work is exactly what we do.
 
 An n8n workflow that reads an invoice, asks a local LLM to extract structured fields, and routes it for auto-approval or manual review based on the amount and the model's confidence.
 
@@ -185,4 +185,4 @@ To turn this into a production AP automation, the natural next steps are: enable
 
 ---
 
-**Need this for real accounting work?** Vonnerco Consulting builds production AP automations integrated with QuickBooks, NetSuite, Xero, and Sage — with proper review trails, fraud detection, dual-approval thresholds, and human-in-the-loop escalation. **[Send a message](https://formspree.io/f/xdavekay)** to start a conversation.
+**Need this for real accounting work?** Vonnerco Consulting builds production AP automations integrated with QuickBooks, NetSuite, Xero, and Sage — with proper review trails, fraud detection, dual-approval thresholds, and human-in-the-loop escalation. **[Send a message](../../contact.html)** to start a conversation.
